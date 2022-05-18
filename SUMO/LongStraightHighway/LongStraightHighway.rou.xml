@@ -1,0 +1,27 @@
+<?xml  version="1.0" encoding="utf-8"?>
+<routes>
+
+  <!-- Creating car types -->
+  <vType accel ="3.0" decel ="6.0" id="CarBase" length="5.0" minGap="2.5" maxSpeed="50.0" sigma="0.5" />
+  <vType accel ="3.0" decel ="6.0" id="CarNoGap" length="5.0" minGap="0" tau="0.1" maxSpeed="50.0" sigma="0" speedFactor="1.0" speedDev="0.0"/>
+  <!-- reset: remove tau if not working -->
+
+  <!-- Creating routes for the cars to move on -->
+  <route id="BottomStartTopEnd" edges="Right01 Right12 Right23 Right34 Right45 Right56 Right67 Right78 Right89 Right910 Right1011" />
+  <route id="TopEndBottomStart" edges="Left1011 Left910 Left89 Left78 Left67 Left56 Left45 Left34 Left23 Left12 Left01" />
+  
+  <!-- Creating actual moving vehicles -->
+
+  <vehicle depart="0" id="veh0" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh1" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh2" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh3" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh4" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh5" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh6" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh7" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh8" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh9" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  
+  
+</routes>
