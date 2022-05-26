@@ -2,7 +2,6 @@ import os
 import sys
 import optparse
 
-import pandas as pd
 from xml.dom import minidom
 
 #import some python modules from the SUMO_HOME/tools dir
