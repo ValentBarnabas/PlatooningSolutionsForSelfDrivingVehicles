@@ -1,0 +1,26 @@
+<?xml  version="1.0" encoding="utf-8"?>
+<routes>
+
+<!-- Emission classes to test: PC_petrol_Euro-6d (for petrol), PC_diesel_Euro-6d (for diesel), PC_BEV (for electronic) -->
+
+  <!-- Creating car types -->
+  <vType accel ="3.0" decel ="6.0" id="CarBase" length="5.0" minGap="2.5" maxSpeed="30.0" sigma="0.5" emissionClass = "HBEFA4/PC_petrol_Euro-6d" />
+  <vType accel ="3.0" decel ="6.0" id="CarNoGap" length="5.0" minGap="0" tau="0.1" maxSpeed="40.0" sigma="0" speedFactor="1.0" speedDev="0.0" emissionClass = "HBEFA4/PC_petrol_Euro-6d" />
+
+  <!-- Creating routes for the cars to move on -->
+  <route id="GoingInCircles" edges="E0102 E0203 E0304 E0405 E0506 E0607 E0708 E0809 E0910 E1011 E1112 E1201" />
+
+  <!-- Creating actual moving vehicles -->
+
+  <vehicle depart="0" id="veh0" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh1" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh2" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh3" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh4" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh5" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh6" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh7" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh8" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+  <vehicle depart="0" id="veh9" route="GoingInCircles" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
+
+</routes>

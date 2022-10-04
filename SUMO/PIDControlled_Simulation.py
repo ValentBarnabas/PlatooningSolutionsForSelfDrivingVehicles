@@ -3,6 +3,7 @@ import sys
 import optparse
 
 from xml.dom import minidom
+from enum import Enum
 
 #import some python modules from the SUMO_HOME/tools dir
 if 'SUMO_HOME' in os.environ:
@@ -14,15 +15,98 @@ else:
 from sumolib import checkBinary   #checks for binary environment vars
 import traci
 
+import PIDController
+
+##-----------------------
+
+# TODO: non controlled vehicles should move with the same speed as controlled ones.
+
+# Constants for the platoon
+MAX_PARTICIPANTS = 10
+MAX_TIME_LEADING = 10   # TODO: try different values
+PLATOONING_SPEED = 30   # TODO: try different values
+SLOW_FACTOR = 0.9       # TODO: calculate optimal value based on emission outputs
+PREF_LANE_IDX = 2
+
+## Constantly for the simulation
+LOOK_AHEAD_DIST = 1000
+PREF_SPACE_DIST = PLATOONING_SPEED/500  # TODO: Try reseting to 0.1
+PREF_TIME_DIST = 0.0001
+SAVINGS_PERCENTAGE = 0.10
+CATCH_UP_MULTIPLIER = 1.2
+LANE_DURATION = 10
+MULTIPLIER_WITH_FULL_AIR_RESISTANCE = 1
+MULTIPLIER_WITH_REDUCED_AIR_RESISTANCE = MULTIPLIER_WITH_FULL_AIR_RESISTANCE-SAVINGS_PERCENTAGE
+OPEN_GAP_DURATION = 0.1
+CHANGE_RATE = 5
+MAX_DECEL = -1
+
+class CONFIG_TO_RUN(Enum):
+    LONG_STRAIGHT_HIGHWAY = "SUMO\LongStraightHighway\LongStraightHighway.sumocfg"
+    LONG_CIRCLE_ROAD = "SUMO\LongCircleRoad\LongCircleRoad.sumocfg"
+
+class EMISSION_FILES(Enum):
+    UNCONTROLLED = "simulationResults\emissionBaseValues_Uncontrolled.xml"
+    CONTROLLED = "simulationResults\emissionBaseValues_Controlled.xml"
+    CONTROLLED_SLOW_TESTING = "simulationResults\emissionBaseValues_Controlled_SlowFactorAt_" + str('%g'%(SLOW_FACTOR*100)) + "_Percentage.xml"
+
+class SCALED_EMISSION_FILES(Enum):
+    UNCONTROLLED = "simulationResults\emissionScaledValues_Uncontrolled.xml"
+    CONTROLLED = "simulationResults\emissionScaledValues_Controlled.xml"
+    CONTROLLED_SLOW_TESTING = "simulationResults\emissionScaledValues_Controlled_SlowFactorAt_" + str('%g'%(SLOW_FACTOR*100)) + "_Percentage.xml"
+
+class WITH_DELAY(Enum):
+    NORMAL = "150"
+    SHORT = "10"
+    NONE = "0"
+
+class ZOOM_LEVEL(Enum):
+    LONG_STRAIGHT_HIGHWAY = 9500
+    LONG_CIRCLE_ROAD = 4500
+
+class NUM_OF_SUB_LANES(Enum):
+    NORMAL = "10"
+    MINIMAL = "2"
+    NONE = "0"
+
+class RUN_WITH_GUI(Enum):
+    YES = False
+    NO = True
+
+class IS_CONTROLLED(Enum):
+    YES = True
+    NO = False
+
+class Preset:
+    def __init__(self, configName, emissionBaseFileName, emissionScaledFileName, withDelay, numOfSubLanes, zoomLevel, runUntilTime, runWithGUI, isControlled):
+        self.configName = configName
+        self.emissionBaseFileName = emissionBaseFileName
+        self.emissionScaledFileName = emissionScaledFileName
+        self.withDelay = withDelay
+        self.numOfSubLanes = numOfSubLanes
+        self.zoomLevel = zoomLevel
+        self.runUntilTime = runUntilTime
+        self.runWithGUI = runWithGUI
+        self.isControlled = isControlled
+
+PRESET = Preset(
+    configName = CONFIG_TO_RUN.LONG_CIRCLE_ROAD.value,
+    emissionBaseFileName = EMISSION_FILES.UNCONTROLLED.value,
+    emissionScaledFileName = SCALED_EMISSION_FILES.UNCONTROLLED.value,
+    withDelay = WITH_DELAY.SHORT.value,
+    numOfSubLanes = NUM_OF_SUB_LANES.MINIMAL.value,
+    zoomLevel = ZOOM_LEVEL.LONG_CIRCLE_ROAD.value,
+    runUntilTime = float(1000),
+    runWithGUI = RUN_WITH_GUI.YES,
+    isControlled = IS_CONTROLLED.NO
+)
+
 def get_options():
     opt_parser = optparse.OptionParser()
-    opt_parser.add_option("--nogui", action="store_true", default=False,
+    opt_parser.add_option("--nogui", action="store_true", default=PRESET.runWithGUI.value,
                          help="run the commandline version of sumo")
     options, args = opt_parser.parse_args()
     return options
-
-##-----------------------
-import PIDController
 
 class Car:
     def __init__(self, id):
@@ -40,23 +124,29 @@ class Car:
     def setLaneAndOpenGap(self, laneID, laneDuration, prefTimeDist, prefSpaceDist, openGapDuration, changeRate, maxDecel):
         traci.vehicle.changeLane(self.id, laneID, laneDuration)
         traci.vehicle.setTau(self.id, prefSpaceDist)
-        if traci.vehicle.getLeader(self.id, 1000) != None:
-            [currLeaderID, currLeaderDist] = traci.vehicle.getLeader(self.id, 1000)
+        if traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST) != None:
+            [currLeaderID, currLeaderDist] = traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST)
             traci.vehicle.openGap(self.id, prefTimeDist, prefSpaceDist, openGapDuration, changeRate, maxDecel, currLeaderID)
             if traci.vehicle.getSpeed(self.id) < traci.vehicle.getSpeed(currLeaderID):  #Remove this for openGap error testing
-                traci.vehicle.setSpeed(self.id, traci.vehicle.getSpeed(currLeaderID)*1.2)
-            #If distance in time with car in front is bigget than preferred, set speed to *1.2
+                traci.vehicle.setSpeed(self.id, traci.vehicle.getSpeed(currLeaderID) * CATCH_UP_MULTIPLIER) #If distance in time with car in front is bigget than preferred, set speed to catchUpMultiplier
             
-    def checkLeftForLeader(self, carInFront):
+    def checkLeftForCarInFront(self, carInFront):   # Checks if the car in front of us in the platooning list is ahead of us in the left. Used for moving to the back of the platoon.
         leftLeaders = traci.vehicle.getLeftLeaders(self.id)
-        for leaders in leftLeaders:
-            if (leaders[0] == carInFront.id): ##car in fron of us in the list is ahead of us
+        for leftLeader in leftLeaders:
+            if (leftLeader[0] == carInFront.id): # Car in fron of us in the list is ahead of us. TODO: check if can be done with leftLeaders.id instead of [0]
                 return True
         return False
+
+    def checkIfIsChangingLanes(self):  # Check if the car is currently changing lanes
+        lateralSpeed = traci.vehicle.getLateralSpeed(self.id)
+        if (lateralSpeed == 0):
+            return False
+        return True
+
     
-    def checkForLeaderInPrefLine(self, carInFront):
-        if traci.vehicle.getLeader(self.id, 1000) != None:
-            [currLeaderID, currLeaderDist] = traci.vehicle.getLeader(self.id, 1000)
+    def checkForCarInFrontInPreferedLane(self, carInFront): # Called when in the preferred lane of the platoon, returns whether the given car is the one in front of us
+        if traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST) != None:
+            [currLeaderID, currLeaderDist] = traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST)
             if currLeaderID == carInFront:
                 return True
         return False
@@ -70,98 +160,100 @@ class Platoon:
         self.platoonSpeed = platoonSpeed
         self.prefLaneIdx = prefLaneIdx
         self.slowFactor = slowFactor
-        self.prefTimeDist = 0.0001
-        self.savingPercentage = 0.15
+        self.prefTimeDist = PREF_TIME_DIST
+        self.savingPercentage = SAVINGS_PERCENTAGE
         
     def addCar(self, car):
-        if(len(self.cars)+1 <= self.maxParticipants):
-            if(self.leader == None):
+        if(len(self.cars)+1 <= self.maxParticipants):   # Checks if platoon capacity is at its maximum, only adds new cars if they can fit
+            if(self.leader == None):    # If there is no leader, the newly added car becomes the leader
                 self.leader = car
                 self.leader.isLeading = True
                 self.leader.isFollowing = False
-            else:
+            else:                       # Else it is just added to the end of the list of the following cars
                 self.cars.append(car)
-                car.isFollowing = True
                 car.isLeading = False
+                car.isFollowing = True
                 
-    def removeCarByID(self, carID): #a jarmuvek ID-jat hasznalja azonositashoz, mivel a megkapott jarmu mas memoria beli cimmel rendelkezik
-        if self.leader.id == carID:
-            self.leader.isLeader = False     #vezeto mar nem vezeto
-            if len(self.cars) > 0:
-                #Platoon still has other cars
-                self.leader = self.cars.pop(0)   #vezeto az utana kovetkezo jarmu lesz
-                self.leader.isLeader = True      #uj vezeto lesz a vezeto
-                self.leader.isFollowing = False  #uj vezeto nem kovet senkit
-            else:
-                #Platoon has no cars left
+    def removeCarByID(self, carID): # Uses the ID of cars, as the given Car has a different ID in memory
+        if self.leader.id == carID: # Wanting to delete Leader car
+            self.leader.isLeader = False    # Leading car is no longer the Leader
+            if len(self.cars) > 0:          # The Platoon still has other cars
+                self.leader = self.cars.pop(0)   # First car from the following list becomes the Leader
+                self.leader.isLeader = True      # Leader values is flipped for new Leader
+                self.leader.isFollowing = False  # New Leader doesn't follow anyone
+            else:                           # The Platoon has no cars left
                 self.leader.isFinished = True
                 self.leader = None
                 print("Platoon is empty")
-        else:  #search for the car and delete it
+        else:                       # Wanting to delete non-leading car. Search for the car and delete it. No need to set new leader car for the one following it, it works based on order in a list
             for tempCar in self.cars:
                 if tempCar.id == carID:
                     self.cars.pop(self.cars.index(tempCar))
             
-    def controlCars(self):
-        #control
-        if self.leader != None:
-            self.leader.setLaneAndSpeed(self.prefLaneIdx, 10, self.platoonSpeed)
-            self.leader.consumptionValue.append(1)
-        
-        for car in self.cars:
-            #Car is following another
-            if car.isFollowing:
-                #Reset: prefSpaceDist = 0.1
-                car.setLaneAndOpenGap(laneID=self.prefLaneIdx, laneDuration=10, prefTimeDist=self.prefTimeDist, prefSpaceDist=self.platoonSpeed/500, openGapDuration=0.1, changeRate=5, maxDecel=-1)
-                car.consumptionValue.append(1-self.savingPercentage)
-            #Car is not following another
-            else:
-                carInFront = self.cars[self.cars.index(car)-1] #car before ours in the list
-                gotBehindCIF = False
-                if car.checkLeftForLeader(carInFront):
-                    car.setLaneAndSpeed(self.prefLaneIdx, 10, self.platoonSpeed*self.slowFactor)
-                    gotBehindCIF = True
-                elif car.checkForLeaderInPrefLine(carInFront):
-                    car.setLaneAndSpeed(self.prefLaneIdx, 10, self.platoonSpeed*self.slowFactor) ##remove self.slowfactor
-                else:
-                    if traci.vehicle.getLaneIndex(car.id) == self.prefLaneIdx:
-                        car.setLaneAndSpeed(self.prefLaneIdx-1, 10, self.platoonSpeed)
-                    else:
-                        car.setLaneAndSpeed(self.prefLaneIdx-1, 10, self.platoonSpeed*self.slowFactor)
-                    
-                #ha vegigment es a helyen van, es mar a megfelelo savban van, isFollowing = true
-                if gotBehindCIF:
-                    car.isFollowing = True
-                car.consumptionValue.append(1)
+    def controlCars(self, isControlled):
+        if (isControlled): 
+            if self.leader != None: # If there is a Leader car, set it's values
+                self.leader.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed)
+                self.leader.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
+                # TODO: add changeLeader if leader's time is up and there are more cars
+            
+            for car in self.cars:
+                if car.isFollowing:     # Car is following someone
+                    car.setLaneAndOpenGap(self.prefLaneIdx, LANE_DURATION, self.prefTimeDist, PREF_SPACE_DIST, OPEN_GAP_DURATION, CHANGE_RATE, MAX_DECEL)
+                    car.consumptionValue.append(MULTIPLIER_WITH_REDUCED_AIR_RESISTANCE)
+                else:                   # Car is not following another
+                    carInFront = self.cars[self.cars.index(car)-1] # The Car before ours in the list
+                    gotBehindCIF = False
+                    if car.checkLeftForCarInFront(carInFront):      # Checks if the car in front of us in the lists is really in front of us
+                        car.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed*self.slowFactor)    # Car is in front of us, we can change to it's lane and follow it normally
+                        gotBehindCIF = True
+                    elif car.checkForCarInFrontInPreferedLane(carInFront):
+                        car.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed*self.slowFactor) # TODO: check if this place is ever needed, try remove self.slowfactor
+                    else:                                           # Car that should be in front of us is behind us
+                        if traci.vehicle.getLaneIndex(car.id) == self.prefLaneIdx:  # Car is in the preferred lane, but should not be
+                            car.setLaneAndSpeed(self.prefLaneIdx-1, LANE_DURATION, self.platoonSpeed)   # Car has to change to an outer layer to slow down and go to the back
+                        else:                                                       # Car is in the outer lane, where it is moving slowly to the back
+                            if car.checkIfIsChangingLanes() == False:
+                                car.setLaneAndSpeed(self.prefLaneIdx-1, LANE_DURATION, self.platoonSpeed*self.slowFactor)   # Car can slow without making others also slow
+                            else:
+                                car.setLaneAndSpeed(self.prefLaneIdx-1, LANE_DURATION, self.platoonSpeed)   # Car cant yet slow without affecting others
+
+                        
+                    if gotBehindCIF:    # Car got back to the end of the line, and is in the right lane
+                        car.isFollowing = True
+                    car.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
+        else:   # Simulates traffic happening without suggested platoon methods. We assume that the cars are far enough from each other that no reduction in air resistance is present
+            self.leader.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed)
+            self.leader.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
+            for car in self.cars:
+                car.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed)
+                car.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
     
-    def changeLeader(self):
+    def changeLeader(self): # Changes the leader of the platoon, adding the former leader to the end of the following cars, and the first from the following list becomes the new Leader
         self.cars.append(self.leader)
         self.leader.isLeader = False
         self.leader = self.cars.pop(0)
         self.leader.isLeader = True
         self.leader.isFollowing = False
 
+
 #control loop for TraCI
 def run(): 
     step = 0
-    
-    prefDistance = 0.1
-    
-    listOfCars = []
-    
-    maxParticipants = 10
-    maxTimeLeading = 10
-    platoonSpeed = 30
-    slowFactor = 0.8
-    prefLaneIdx = 2
-
-    bigPlatoon = Platoon(maxParticipants, maxTimeLeading, platoonSpeed, slowFactor, prefLaneIdx)
-    
-    while traci.simulation.getMinExpectedNumber() > 0:    #runs while there are cars in the network
-        traci.simulationStep()
         
-        departedList = traci.simulation.getDepartedIDList() #list of vehicles that departed in this step
-        for currVeh in departedList:
+    listOfCars = []
+
+    bigPlatoon = Platoon(MAX_PARTICIPANTS, MAX_TIME_LEADING, PLATOONING_SPEED, SLOW_FACTOR, PREF_LANE_IDX)
+    
+    while traci.simulation.getMinExpectedNumber() > 0:    # runs while there are cars in the network
+
+        if ( PRESET.configName == CONFIG_TO_RUN.LONG_CIRCLE_ROAD.value and traci.simulation.getTime() > PRESET.runUntilTime ):  # Stops the simulation when infinite loop is used
+            break
+        
+        traci.simulationStep()
+                
+        departedList = traci.simulation.getDepartedIDList() # list of vehicles that departed in this step
+        for currVeh in departedList:    # Goes through the list of departed cars, if they are not in the platoon, it adds them
             isTracked = False
             for i in listOfCars:
                 if currVeh == i.id:
@@ -171,28 +263,27 @@ def run():
                 listOfCars.append(newCar)
                 bigPlatoon.addCar(newCar)
                 
-        arrivedList = traci.simulation.getArrivedIDList() #vehicles which have to be set to finished
+        arrivedList = traci.simulation.getArrivedIDList() # vehicles which have arrived to their goal
         for currVeh in arrivedList:
             for i in listOfCars:
                 if currVeh == i.id:
                     bigPlatoon.removeCarByID(i.id)
         
-        #getTime - can be used for tracking the lead of each car
-        vehList = traci.vehicle.getIDList()
-        if('veh0' in vehList):
-                traci.gui.trackVehicle('View #0', 'veh0')
-                traci.gui.setZoom('View #0', 9500)
+        if (PRESET.runWithGUI.value == RUN_WITH_GUI.YES.value):             # Only call GUI method if running with GUI
+            vehList = traci.vehicle.getIDList()
+            if('veh0' in vehList):
+                    traci.gui.trackVehicle('View #0', 'veh0')               # Sets view focused to "veh0"
+                    traci.gui.setZoom('View #0', PRESET.zoomLevel)          # PARAM: Sets the zoom level to given value, 9500 for straight, 4500 for circle
         
-        bigPlatoon.controlCars()
-        
-        
-        #Simulation events
-        # if traci.simulation.getTime() == 10:
+        bigPlatoon.controlCars(PRESET.isControlled.value)    # Controls the cars in the platoon
+                
+        # Simulation events
+        # if traci.simulation.getTime() == 10:  # Simulation event for removing one car
         #     bigPlatoon.removeCarByID(listOfCars[4].id)
         
-        if traci.simulation.getTime() == 20:
-            bigPlatoon.changeLeader()
-        if traci.simulation.getTime() % 50 == 0:
+        # if traci.simulation.getTime() == 20:    # First leader change in the program
+        #     bigPlatoon.changeLeader()
+        if traci.simulation.getTime() % 50 == 0:    # Changes the leader every x time. TODO: change it so it works depending on the given MAX_TIME_LEADING
             bigPlatoon.changeLeader()
                 
         step += 1
@@ -201,7 +292,6 @@ def run():
 
     createConsumptionXML(listOfCars)
 
-    #sys.stdout.flush()
 
 def createConsumptionXML(listOfCars):
     ''' pref xml form:
@@ -217,7 +307,7 @@ def createConsumptionXML(listOfCars):
     root = base.createElement("scaling-export")
     base.appendChild(root)
 
-    longestScaleList = 0    #length of longest consumption value table
+    longestScaleList = 0    # length of longest consumption value table
     for car in listOfCars:
         if len(car.consumptionValue) > longestScaleList:
             longestScaleList = len(car.consumptionValue)
@@ -236,34 +326,35 @@ def createConsumptionXML(listOfCars):
             timestepChild.appendChild(carChild)
 
     xmlString = base.toprettyxml(indent = "\t")
-    savePathFile = "emissionScaleValues.xml"
+    savePathFile = PRESET.emissionScaledFileName
     with open(savePathFile, "w") as f:
         f.write(xmlString)
+        
 
-#main entry point
+# main entry point
 if __name__ == "__main__":
     options = get_options()
     
-    #check binary
+    # check binary
     if options.nogui:
         sumoBinary = checkBinary('sumo')
     else:
         sumoBinary = checkBinary('sumo-gui')
-    
-    #traci tarts sumo as a subprocess and then this scipt connects and runs
-    sumocfgURL = "PlatooningSolutionsForSelfDrivingVehicles\SUMO\LongStraightHighway\LongStraightHighway.sumocfg"
-    traci.start([sumoBinary, "-c", sumocfgURL,
-                #"--tripinfo-output", "tripinfo.xml",    #writes out relevant data about car's trip
-                #"--lanechange-output", "lanechanges.xml",   #writes out all lanechanges to the given file 
-                "--emission-output", "emissionBaseValues.xml",    #writes out emissions by each car in each step
-                "--step-length", "0.1",    #length of each simulation step
-                "--lateral-resolution", "10.0",    #simulates sublanes
-                "--collision.mingap-factor", "0", #only physical collisions are registered
-                "--collision.action", "warn",     #cars wont teleport because of collision, only print a warning
-                "-d", "150",   #sets delay in gui
-                "-b", "0",     #sets beginning simulation time
-                "-e", "1000"   #sets ending simulation time
+
+    # traci tarts sumo as a subprocess and then this scipt connects and runs
+    traci.start([sumoBinary,
+                "-c", PRESET.configName,                            # sets config file for sumo to use
+                #"--tripinfo-output", "tripinfo.xml",               # writes out relevant data about car's trip
+                #"--lanechange-output", "lanechanges.xml",          # writes out all lanechanges to the given file 
+                "--emission-output", PRESET.emissionBaseFileName,   # writes out emissions by each car in each step
+                "--step-length", "0.2",                             # length of each simulation step
+                "--lateral-resolution", PRESET.numOfSubLanes,       # PARAM: simulates sublanes
+                "--collision.mingap-factor", "0",                   # only physical collisions are registered
+                "--collision.action", "warn",                       # cars wont teleport because of collision, only print a warning
+                "-d", PRESET.withDelay,        # PARAM: sets delay in gui, optimal for viewing is ~150
+                "-b", "0",          # sets beginning simulation time
+                "-e", "1000",       # sets ending simulation time
+                "--no-warnings"
                 ])
-    #sublane and timestamp comes here
     
     run()

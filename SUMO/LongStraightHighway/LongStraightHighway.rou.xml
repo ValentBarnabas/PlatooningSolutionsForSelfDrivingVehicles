@@ -1,10 +1,11 @@
 <?xml  version="1.0" encoding="utf-8"?>
 <routes>
 
+<!-- Emission classes to test: PC_petrol_Euro-6d (for petrol), PC_diesel_Euro-6d (for diesel), PC_BEV (for electronic) -->
+
   <!-- Creating car types -->
-  <vType accel ="3.0" decel ="6.0" id="CarBase" length="5.0" minGap="2.5" maxSpeed="50.0" sigma="0.5" />
-  <vType accel ="3.0" decel ="6.0" id="CarNoGap" length="5.0" minGap="0" tau="0.1" maxSpeed="50.0" sigma="0" speedFactor="1.0" speedDev="0.0"/>
-  <!-- reset: remove tau if not working -->
+  <vType accel ="3.0" decel ="6.0" id="CarBase" length="5.0" minGap="2.5" maxSpeed="30.0" sigma="0.5" emissionClass = "HBEFA4/PC_petrol_Euro-6d" />
+  <vType accel ="3.0" decel ="6.0" id="CarNoGap" length="5.0" minGap="0" tau="0.1" maxSpeed="40.0" sigma="0" speedFactor="1.0" speedDev="0.0" emissionClass = "HBEFA4/PC_petrol_Euro-6d" />
 
   <!-- Creating routes for the cars to move on -->
   <route id="BottomStartTopEnd" edges="Right01 Right12 Right23 Right34 Right45 Right56 Right67 Right78 Right89 Right910 Right1011" />
@@ -22,6 +23,5 @@
   <vehicle depart="0" id="veh7" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
   <vehicle depart="0" id="veh8" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
   <vehicle depart="0" id="veh9" route="BottomStartTopEnd" type="CarNoGap" color="1,0,0" departPos="last" departSpeed="30"/>
-  
   
 </routes>
