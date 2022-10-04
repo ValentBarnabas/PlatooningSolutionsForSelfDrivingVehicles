@@ -50,10 +50,10 @@ class EMISSION_FILES(Enum):
     CONTROLLED = "simulationResults\emissionBaseValues_Controlled.xml"
     CONTROLLED_SLOW_TESTING = "simulationResults\emissionBaseValues_Controlled_SlowFactorAt_" + str('%g'%(SLOW_FACTOR*100)) + "_Percentage.xml"
 
-class SCALED_EMISSION_FILES(Enum):
-    UNCONTROLLED = "simulationResults\emissionScaledValues_Uncontrolled.xml"
-    CONTROLLED = "simulationResults\emissionScaledValues_Controlled.xml"
-    CONTROLLED_SLOW_TESTING = "simulationResults\emissionScaledValues_Controlled_SlowFactorAt_" + str('%g'%(SLOW_FACTOR*100)) + "_Percentage.xml"
+class SCALING_EMISSION_FILES(Enum):
+    UNCONTROLLED = "simulationResults\emissionScalingValues_Uncontrolled.xml"
+    CONTROLLED = "simulationResults\emissionScalingValues_Controlled.xml"
+    CONTROLLED_SLOW_TESTING = "simulationResults\emissionScalingValues_Controlled_SlowFactorAt_" + str('%g'%(SLOW_FACTOR*100)) + "_Percentage.xml"
 
 class WITH_DELAY(Enum):
     NORMAL = "150"
@@ -78,10 +78,10 @@ class IS_CONTROLLED(Enum):
     NO = False
 
 class Preset:
-    def __init__(self, configName, emissionBaseFileName, emissionScaledFileName, withDelay, numOfSubLanes, zoomLevel, runUntilTime, runWithGUI, isControlled):
+    def __init__(self, configName, emissionBaseFileName, emissionScalingFileName, withDelay, numOfSubLanes, zoomLevel, runUntilTime, runWithGUI, isControlled):
         self.configName = configName
         self.emissionBaseFileName = emissionBaseFileName
-        self.emissionScaledFileName = emissionScaledFileName
+        self.emissionScalingFileName = emissionScalingFileName
         self.withDelay = withDelay
         self.numOfSubLanes = numOfSubLanes
         self.zoomLevel = zoomLevel
@@ -92,7 +92,7 @@ class Preset:
 PRESET = Preset(
     configName = CONFIG_TO_RUN.LONG_CIRCLE_ROAD.value,
     emissionBaseFileName = EMISSION_FILES.UNCONTROLLED.value,
-    emissionScaledFileName = SCALED_EMISSION_FILES.UNCONTROLLED.value,
+    emissionScalingFileName = SCALING_EMISSION_FILES.UNCONTROLLED.value,
     withDelay = WITH_DELAY.SHORT.value,
     numOfSubLanes = NUM_OF_SUB_LANES.MINIMAL.value,
     zoomLevel = ZOOM_LEVEL.LONG_CIRCLE_ROAD.value,
@@ -326,7 +326,7 @@ def createConsumptionXML(listOfCars):
             timestepChild.appendChild(carChild)
 
     xmlString = base.toprettyxml(indent = "\t")
-    savePathFile = PRESET.emissionScaledFileName
+    savePathFile = PRESET.emissionScalingFileName
     with open(savePathFile, "w") as f:
         f.write(xmlString)
         
