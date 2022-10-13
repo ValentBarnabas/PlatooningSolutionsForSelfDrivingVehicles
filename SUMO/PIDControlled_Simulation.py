@@ -19,20 +19,18 @@ import PIDController
 
 ##-----------------------
 
-# TODO: non controlled vehicles should move with the same speed as controlled ones.
-
 # Constants for the platoon
 MAX_PARTICIPANTS = 10
-MAX_TIME_LEADING = 10   # TODO: try different values
-PLATOONING_SPEED = 30   # TODO: try different values
-SLOW_FACTOR = 0.9       # TODO: calculate optimal value based on emission outputs
-PREF_LANE_IDX = 2
+MAX_TIME_LEADING = 50   # TODO: try different values (value used for simulations was 50)
+PLATOONING_SPEED = 30   # TODO: try different values (value used for simulations was 30)
+SLOW_FACTOR = 0.91       # Optimal value based on simulations is 0.91
+PREF_LANE_IDX = 1
 
 ## Constantly for the simulation
 LOOK_AHEAD_DIST = 1000
 PREF_SPACE_DIST = PLATOONING_SPEED/500  # TODO: Try reseting to 0.1
 PREF_TIME_DIST = 0.0001
-SAVINGS_PERCENTAGE = 0.10
+SAVINGS_PERCENTAGE = 0.1                # TODO: Set to desired amount (should be around 0.05-0.15)
 CATCH_UP_MULTIPLIER = 1.2
 LANE_DURATION = 10
 MULTIPLIER_WITH_FULL_AIR_RESISTANCE = 1
@@ -78,27 +76,29 @@ class IS_CONTROLLED(Enum):
     NO = False
 
 class Preset:
-    def __init__(self, configName, emissionBaseFileName, emissionScalingFileName, withDelay, numOfSubLanes, zoomLevel, runUntilTime, runWithGUI, isControlled):
+    def __init__(self, configName, zoomLevel, runWithGUI, isControlled, emissionBaseFileName, emissionScalingFileName, withDelay, numOfSubLanes, runUntilTime, simulationStepLength):
         self.configName = configName
+        self.zoomLevel = zoomLevel
+        self.runWithGUI = runWithGUI
+        self.isControlled = isControlled
         self.emissionBaseFileName = emissionBaseFileName
         self.emissionScalingFileName = emissionScalingFileName
         self.withDelay = withDelay
         self.numOfSubLanes = numOfSubLanes
-        self.zoomLevel = zoomLevel
         self.runUntilTime = runUntilTime
-        self.runWithGUI = runWithGUI
-        self.isControlled = isControlled
+        self.simulationStepLength = simulationStepLength
 
 PRESET = Preset(
     configName = CONFIG_TO_RUN.LONG_CIRCLE_ROAD.value,
-    emissionBaseFileName = EMISSION_FILES.UNCONTROLLED.value,
-    emissionScalingFileName = SCALING_EMISSION_FILES.UNCONTROLLED.value,
-    withDelay = WITH_DELAY.SHORT.value,
-    numOfSubLanes = NUM_OF_SUB_LANES.MINIMAL.value,
     zoomLevel = ZOOM_LEVEL.LONG_CIRCLE_ROAD.value,
+    runWithGUI = RUN_WITH_GUI.NO,
+    isControlled = IS_CONTROLLED.YES,
+    emissionBaseFileName = EMISSION_FILES.CONTROLLED.value,
+    emissionScalingFileName = SCALING_EMISSION_FILES.CONTROLLED.value,
+    withDelay = WITH_DELAY.NONE.value,
+    numOfSubLanes = NUM_OF_SUB_LANES.MINIMAL.value,
     runUntilTime = float(1000),
-    runWithGUI = RUN_WITH_GUI.YES,
-    isControlled = IS_CONTROLLED.NO
+    simulationStepLength = 0.2
 )
 
 def get_options():
@@ -133,7 +133,7 @@ class Car:
     def checkLeftForCarInFront(self, carInFront):   # Checks if the car in front of us in the platooning list is ahead of us in the left. Used for moving to the back of the platoon.
         leftLeaders = traci.vehicle.getLeftLeaders(self.id)
         for leftLeader in leftLeaders:
-            if (leftLeader[0] == carInFront.id): # Car in fron of us in the list is ahead of us. TODO: check if can be done with leftLeaders.id instead of [0]
+            if (leftLeader[0] == carInFront.id): # Car in fron of us in the list is ahead of us
                 return True
         return False
 
@@ -143,13 +143,6 @@ class Car:
             return False
         return True
 
-    
-    def checkForCarInFrontInPreferedLane(self, carInFront): # Called when in the preferred lane of the platoon, returns whether the given car is the one in front of us
-        if traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST) != None:
-            [currLeaderID, currLeaderDist] = traci.vehicle.getLeader(self.id, LOOK_AHEAD_DIST)
-            if currLeaderID == carInFront:
-                return True
-        return False
         
 class Platoon:
     def __init__(self, maxParticipants, maxTimeLeading, platoonSpeed, slowFactor, prefLaneIdx):
@@ -192,10 +185,12 @@ class Platoon:
             
     def controlCars(self, isControlled):
         if (isControlled): 
+            if traci.simulation.getTime() % self.maxTimeLeading == 0 and len(self.cars) > 0:
+                self.changeLeader()
+            
             if self.leader != None: # If there is a Leader car, set it's values
                 self.leader.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed)
                 self.leader.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
-                # TODO: add changeLeader if leader's time is up and there are more cars
             
             for car in self.cars:
                 if car.isFollowing:     # Car is following someone
@@ -207,8 +202,6 @@ class Platoon:
                     if car.checkLeftForCarInFront(carInFront):      # Checks if the car in front of us in the lists is really in front of us
                         car.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed*self.slowFactor)    # Car is in front of us, we can change to it's lane and follow it normally
                         gotBehindCIF = True
-                    elif car.checkForCarInFrontInPreferedLane(carInFront):
-                        car.setLaneAndSpeed(self.prefLaneIdx, LANE_DURATION, self.platoonSpeed*self.slowFactor) # TODO: check if this place is ever needed, try remove self.slowfactor
                     else:                                           # Car that should be in front of us is behind us
                         if traci.vehicle.getLaneIndex(car.id) == self.prefLaneIdx:  # Car is in the preferred lane, but should not be
                             car.setLaneAndSpeed(self.prefLaneIdx-1, LANE_DURATION, self.platoonSpeed)   # Car has to change to an outer layer to slow down and go to the back
@@ -218,7 +211,6 @@ class Platoon:
                             else:
                                 car.setLaneAndSpeed(self.prefLaneIdx-1, LANE_DURATION, self.platoonSpeed)   # Car cant yet slow without affecting others
 
-                        
                     if gotBehindCIF:    # Car got back to the end of the line, and is in the right lane
                         car.isFollowing = True
                     car.consumptionValue.append(MULTIPLIER_WITH_FULL_AIR_RESISTANCE)
@@ -277,14 +269,11 @@ def run():
         
         bigPlatoon.controlCars(PRESET.isControlled.value)    # Controls the cars in the platoon
                 
-        # Simulation events
+        # Simulation event examples
         # if traci.simulation.getTime() == 10:  # Simulation event for removing one car
         #     bigPlatoon.removeCarByID(listOfCars[4].id)
-        
         # if traci.simulation.getTime() == 20:    # First leader change in the program
         #     bigPlatoon.changeLeader()
-        if traci.simulation.getTime() % 50 == 0:    # Changes the leader every x time. TODO: change it so it works depending on the given MAX_TIME_LEADING
-            bigPlatoon.changeLeader()
                 
         step += 1
         
@@ -343,15 +332,16 @@ if __name__ == "__main__":
 
     # traci tarts sumo as a subprocess and then this scipt connects and runs
     traci.start([sumoBinary,
-                "-c", PRESET.configName,                            # sets config file for sumo to use
-                #"--tripinfo-output", "tripinfo.xml",               # writes out relevant data about car's trip
-                #"--lanechange-output", "lanechanges.xml",          # writes out all lanechanges to the given file 
-                "--emission-output", PRESET.emissionBaseFileName,   # writes out emissions by each car in each step
-                "--step-length", "0.2",                             # length of each simulation step
-                "--lateral-resolution", PRESET.numOfSubLanes,       # PARAM: simulates sublanes
-                "--collision.mingap-factor", "0",                   # only physical collisions are registered
-                "--collision.action", "warn",                       # cars wont teleport because of collision, only print a warning
-                "-d", PRESET.withDelay,        # PARAM: sets delay in gui, optimal for viewing is ~150
+                "-c", PRESET.configName,                                    # sets config file for sumo to use
+                # "--tripinfo-output", "simulationResults/tripinfo.xml",    # writes out relevant data about car's trip. Eg.: distance traveled
+                # "--tripinfo-output.write-unfinished",                     # changes behavior to write out unfinished trips too
+                #"--lanechange-output", "lanechanges.xml",                  # writes out all lanechanges to the given file 
+                "--emission-output", PRESET.emissionBaseFileName,           # writes out emissions by each car in each step
+                "--step-length", str(PRESET.simulationStepLength),          # length of each simulation step
+                "--lateral-resolution", PRESET.numOfSubLanes,               # PARAM: simulates sublanes
+                "--collision.mingap-factor", "0",   # only physical collisions are registered
+                "--collision.action", "warn",       # cars wont teleport because of collision, only print a warning
+                "-d", PRESET.withDelay,             # PARAM: sets delay in gui, optimal for viewing is ~150
                 "-b", "0",          # sets beginning simulation time
                 "-e", "1000",       # sets ending simulation time
                 "--no-warnings"
