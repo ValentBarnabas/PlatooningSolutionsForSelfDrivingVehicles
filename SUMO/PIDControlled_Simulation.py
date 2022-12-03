@@ -303,7 +303,7 @@ def createConsumptionXML(listOfCars):
 
     for i in range(longestScaleList):
         timestepChild = base.createElement('timestep')
-        timestepChild.setAttribute("time", str("{:.2f}".format(i/10)))
+        timestepChild.setAttribute("time", str("{:.2f}".format(i*PRESET.simulationStepLength))) #i/10
         root.appendChild(timestepChild)
         for car in listOfCars:
             carChild = base.createElement('vehicle')
